@@ -27,3 +27,8 @@ register(
     entry_point='deflector_gym.envs.meent_env:MeentAction1D4'
 )
 
+register(
+    id='MultiRIIndex-v0',
+    entry_point='deflector_gym.envs.meent_env:MultiRIIndex'
+)
+

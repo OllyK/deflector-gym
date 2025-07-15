@@ -34,8 +34,10 @@ class MeentBase(DeflectorBase):
             desired_angle=70,
             order=40,
             thickness=325,
+            refractive_index=1.45,
     ):
-        super().__init__(n_cells, wavelength, desired_angle, order, thickness)
+        super().__init__(n_cells, wavelength, desired_angle, order, thickness, 
+                         refractive_index)
 
     def get_efficiency(self, struct):
         # struct [1, -1, 1, 1, ...]
@@ -45,7 +47,7 @@ class MeentBase(DeflectorBase):
         period = abs(wls / np.sin(self.desired_angle / 180 * np.pi))
         calc = JLABCode(
             grating_type=0,
-            n_I=1.45, n_II=1., theta=0, phi=0.,
+            n_I=self.refractive_index, n_II=1., theta=0, phi=0.,
             fourier_order=self.order, period=period,
             wls=wls, pol=1,
             patterns=None, ucell=struct, thickness=np.array([self.thickness])
@@ -114,11 +116,12 @@ class MeentAction1D2(MeentBase):
             n_cells=256,
             wavelength=1100,
             desired_angle=70,
+            refractive_index=1.45,
             initial_pos='center',  # initial agent's position
             *args,
             **kwargs
     ):
-        super().__init__(n_cells, wavelength, desired_angle)
+        super().__init__(n_cells, wavelength, desired_angle, refractive_index)
 
         self.observation_space = gym.spaces.Box(
             low=-1., high=1.,
@@ -157,11 +160,12 @@ class MeentAction1D4(MeentBase):
             n_cells=256,
             wavelength=1100,
             desired_angle=70,
+            refractive_index=1.45,
             initial_pos='center',  # initial agent's position
             *args,
             **kwargs
     ):
-        super().__init__(n_cells, wavelength, desired_angle)
+        super().__init__(n_cells, wavelength, desired_angle, refractive_index)
 
         self.observation_space = gym.spaces.Box(
             low=-1., high=1.,
@@ -202,3 +206,66 @@ class MeentAction1D4(MeentBase):
         reward = self.eff - prev_eff
 
         return np.concatenate((self.struct, self.onehot[self.pos])), reward, False, {}
+
+
+
+class MultiRIIndex(DeflectorBase):
+    def __init__(
+            self,
+            n_cells=256,
+            wavelength=1100,
+            desired_angle=70,
+            order=40,
+            thickness=325,
+            refractive_index=1.45,
+            refractive_index_2=1.0
+        ):
+        super().__init__(n_cells, wavelength, desired_angle, order, thickness, refractive_index)
+        self.ri_on  = refractive_index
+        self.ri_off = refractive_index_2
+
+        self.observation_space = gym.spaces.Box(
+            low=-1., high=1., shape=(n_cells,), dtype=np.float32)
+        self.action_space = gym.spaces.Discrete(n_cells)
+
+    def reset(self):
+        self.struct = self.initialize_struct()
+        self.eff_on,  self.eff_off  = self._compute(self.ri_on),  self._compute(self.ri_off)
+        return self.struct.copy()
+
+    def step(self, action):
+        prev_on, prev_off = self.eff_on, self.eff_off
+        self.flip(action)
+        self.eff_on = self._compute(self.ri_on),
+        self.eff_off = self._compute(self.ri_off)
+
+        reward = self.calculate_reward(
+            self.eff_on, self.eff_off, prev_on, prev_off
+        )
+
+        # log both as custom_metrics
+        info = {'eff_on':  self.eff_on,
+                'eff_off': self.eff_off}
+        return self.struct.copy(), reward, False, info
+    
+    def calculate_reward(self, eff_on, eff_off, prev_eff_on, prev_eff_off):
+        # Calculate the reward based on the efficiency values?
+        r1 = eff_on - prev_eff_on
+        r2 = prev_eff_off - eff_off
+        return r1 + r2
+
+    def _compute(self, ri):
+        # same core as MeentBase.get_efficiency but with n_I=ri
+        struct = self.struct[np.newaxis, np.newaxis, :]
+        wls    = np.array([self.wavelength])
+        period = abs(wls / np.sin(self.desired_angle/180*np.pi))
+        calc = JLABCode(
+            grating_type=0,
+            n_I=ri, n_II=1., theta=0, phi=0.,
+            fourier_order=self.order,
+            period=period, wls=wls, pol=1,
+            patterns=None, ucell=struct,
+            thickness=np.array([self.thickness])
+        )
+        eff, _, _ = calc.reproduce_acs_cell('p_si__real', 1)
+        return eff
