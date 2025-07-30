@@ -216,7 +216,7 @@ class MeentAction1D4(MeentBase):
 
 
 
-class MultiRIIndex(DeflectorBase):
+class MultiRIIndex(MeentBase):
     def __init__(
             self,
             n_cells=256,
@@ -232,23 +232,26 @@ class MultiRIIndex(DeflectorBase):
         self.ri_off = refractive_index_2
 
         self.observation_space = gym.spaces.Box(
-            low=-1., high=1., shape=(n_cells,), dtype=np.float32)
+            low=-1., high=1.,
+            shape=(n_cells,),
+            dtype=np.float64
+        )
         self.action_space = gym.spaces.Discrete(n_cells)
         
-
+    def get_efficiency(self, struct):
+        self.eff_on = self._compute(self.ri_on, struct)
+        self.eff_off = self._compute(self.ri_off, struct)
+        return self.eff_on - self.eff_off
+        
     def reset(self):
         self.struct = self.initialize_struct()
-        self.eff_on = self._compute(self.ri_on)
-        self.eff_off  = self._compute(self.ri_off)
-        self.eff = self.eff_on - self.eff_off
+        self.eff = self.get_efficiency(self.struct)
         return self.struct.copy()
 
     def step(self, action):
         prev_on, prev_off = self.eff_on, self.eff_off
         self.flip(action)
-        self.eff_on = self._compute(self.ri_on)
-        self.eff_off = self._compute(self.ri_off)
-        self.eff = self.eff_on - self.eff_off
+        self.eff = self.get_efficiency(self.struct)
 
         reward = self.calculate_reward(
             self.eff_on, self.eff_off, prev_on, prev_off
@@ -265,19 +268,20 @@ class MultiRIIndex(DeflectorBase):
         r2 = prev_eff_off - eff_off
         return float(r1 + r2)
 
-    def _compute(self, ri):
+    def _compute(self, ri, struct):
         # same core as MeentBase.get_efficiency but with n_I=ri
-        struct = self.struct[np.newaxis, np.newaxis, :]
-        wls    = np.array([self.wavelength])
-        period = abs(wls / np.sin(self.desired_angle/180*np.pi))
+        struct = struct[np.newaxis, np.newaxis, :]
+
+        wls = np.array([self.wavelength])
+        period = abs(wls / np.sin(self.desired_angle / 180 * np.pi))
         calc = JLABCode(
             grating_type=0,
             n_I=ri, n_II=1., theta=0, phi=0.,
-            fourier_order=self.order,
-            period=period, wls=wls, pol=1,
-            patterns=None, ucell=struct,
-            thickness=np.array([self.thickness])
+            fourier_order=self.order, period=period,
+            wls=wls, pol=1,
+            patterns=None, ucell=struct, thickness=np.array([self.thickness])
         )
+
         eff, _, _ = calc.reproduce_acs_cell('p_si__real', 1)
 
         return eff
