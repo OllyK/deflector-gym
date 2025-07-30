@@ -1,4 +1,5 @@
 from functools import partial
+import logging
 
 import gym
 import numpy as np
@@ -6,6 +7,10 @@ import numpy as np
 from JLAB.solver import JLABCode
 from .base import DeflectorBase
 from .actions import Action1D2, Action1D4
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
 
 def badcell(img, mfs):
     img = np.array(img)
@@ -35,6 +40,8 @@ class MeentBase(DeflectorBase):
             order=40,
             thickness=325,
             refractive_index=1.45,
+            *args,
+            **kwargs,
     ):
         super().__init__(n_cells, wavelength, desired_angle, order, thickness, 
                          refractive_index)
@@ -227,17 +234,21 @@ class MultiRIIndex(DeflectorBase):
         self.observation_space = gym.spaces.Box(
             low=-1., high=1., shape=(n_cells,), dtype=np.float32)
         self.action_space = gym.spaces.Discrete(n_cells)
+        
 
     def reset(self):
         self.struct = self.initialize_struct()
-        self.eff_on,  self.eff_off  = self._compute(self.ri_on),  self._compute(self.ri_off)
+        self.eff_on = self._compute(self.ri_on)
+        self.eff_off  = self._compute(self.ri_off)
+        self.eff = self.eff_on - self.eff_off
         return self.struct.copy()
 
     def step(self, action):
         prev_on, prev_off = self.eff_on, self.eff_off
         self.flip(action)
-        self.eff_on = self._compute(self.ri_on),
+        self.eff_on = self._compute(self.ri_on)
         self.eff_off = self._compute(self.ri_off)
+        self.eff = self.eff_on - self.eff_off
 
         reward = self.calculate_reward(
             self.eff_on, self.eff_off, prev_on, prev_off
@@ -252,7 +263,7 @@ class MultiRIIndex(DeflectorBase):
         # Calculate the reward based on the efficiency values?
         r1 = eff_on - prev_eff_on
         r2 = prev_eff_off - eff_off
-        return r1 + r2
+        return float(r1 + r2)
 
     def _compute(self, ri):
         # same core as MeentBase.get_efficiency but with n_I=ri
@@ -268,4 +279,5 @@ class MultiRIIndex(DeflectorBase):
             thickness=np.array([self.thickness])
         )
         eff, _, _ = calc.reproduce_acs_cell('p_si__real', 1)
+
         return eff
