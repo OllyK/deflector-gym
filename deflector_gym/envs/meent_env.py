@@ -218,29 +218,38 @@ class MeentAction1D4(MeentBase):
 
 class MultiRIIndex(MeentBase):
     def __init__(
-            self,
-            n_cells=256,
-            wavelength=1100,
-            desired_angle=70,
-            order=40,
-            thickness=325,
-            refractive_index=1.45,
-            refractive_index_2=1.0
-        ):
+        self,
+        n_cells=256,
+        wavelength=1100,
+        desired_angle=70,
+        order=40,
+        thickness=325,
+        refractive_index=1.45,
+        refractive_index_2=1.0,
+        reward_mode="shaped",
+        lambda_off=1.0,
+        gamma_delta=0.05,
+    ):
+        # explicit, refactor away from kwargs.get
         super().__init__(n_cells, wavelength, desired_angle, order, thickness, refractive_index)
-        self.ri_on  = refractive_index
+        self.reward_mode = reward_mode
+        self.lambda_off = lambda_off
+        self.gamma_delta = gamma_delta
+
+        # on/off refractive indices
+        self.ri_on = refractive_index
         self.ri_off = refractive_index_2
 
         self.observation_space = gym.spaces.Box(
             low=-1., high=1.,
-            shape=(n_cells,),
+            shape=(self.n_cells,),
             dtype=np.float64
         )
-        self.action_space = gym.spaces.Discrete(n_cells)
+        self.action_space = gym.spaces.Discrete(self.n_cells)
         
     def get_efficiency(self, struct):
-        self.eff_on = self._compute(self.ri_on, struct)
-        self.eff_off = self._compute(self.ri_off, struct)
+        self.eff_on = float(self._compute(self.ri_on, struct))
+        self.eff_off = float(self._compute(self.ri_off, struct))
         return self.eff_on - self.eff_off
         
     def reset(self):
@@ -263,10 +272,29 @@ class MultiRIIndex(MeentBase):
         return self.struct.copy(), reward, False, info
     
     def calculate_reward(self, eff_on, eff_off, prev_eff_on, prev_eff_off):
-        # Calculate the reward based on the efficiency values?
-        r1 = eff_on - prev_eff_on
-        r2 = prev_eff_off - eff_off
-        return float(r1 + r2)
+        margin = eff_on - eff_off
+        prev_margin = prev_eff_on - prev_eff_off
+        if self.reward_mode == "margin":
+            return margin
+        if self.reward_mode == "weighted_margin":
+            return eff_on - self.lambda_off * eff_off
+        if self.reward_mode == "margin_delta":
+            return margin + self.gamma_delta * (margin - prev_margin)
+        if self.reward_mode == "ratio":
+            return eff_on / (eff_off + 1e-6)
+        if self.reward_mode == "log_ratio":
+            return np.log((eff_on + 1e-6) / (eff_off + 1e-6))
+        if self.reward_mode == "shaped":
+            on_n  = np.clip(eff_on / 100.0, 0.0, 1.0)
+            off_n = np.clip(eff_off / 100.0, 0.0, 1.0)
+            base  = 1.0 - (1.0 - on_n)**2
+            pen   = off_n**2
+            delta = self.gamma_delta * ((eff_on - prev_eff_on) - (eff_off - prev_eff_off)) / 100.0
+            return float(base - pen + delta)
+        else:
+            # original scheme: delta improvement in margin
+            # (eff_on - prev_eff_on) - (eff_off - prev_eff_off) == margin - prev_margin
+            return float((eff_on - prev_eff_on) - (eff_off - prev_eff_off))
 
     def _compute(self, ri, struct):
         # same core as MeentBase.get_efficiency but with n_I=ri
