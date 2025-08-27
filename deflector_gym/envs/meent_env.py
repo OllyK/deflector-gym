@@ -239,6 +239,9 @@ class MultiRIIndex(MeentBase):
         # on/off refractive indices
         self.ri_on = refractive_index
         self.ri_off = refractive_index_2
+        
+        self.eff_on = 0.0
+        self.eff_off = 0.0
 
         self.observation_space = gym.spaces.Box(
             low=-1., high=1.,
