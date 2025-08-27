@@ -22,6 +22,32 @@ class BestRecorder(gym.Wrapper):
 
         return ret
 
+class Best2RewardRecorder(gym.Wrapper):
+    def __init__(self, env):
+        super().__init__(env)
+
+        # (eff, structure, eff_on, eff_off)
+        self.best = (-np.inf, None, None, None)
+
+    def step(self, action):
+        ret = super().step(action)
+
+        if self.eff > self.best[0]:
+            eff_on = getattr(self.unwrapped, 'eff_on', None)
+            eff_off = getattr(self.unwrapped, 'eff_off', None)
+            self.best = (self.eff, self.struct.copy(), eff_on, eff_off)
+
+        return ret
+
+    def reset(self, *args, **kwargs):
+        ret = super().reset(*args, **kwargs)
+
+        eff_on = getattr(self.unwrapped, 'eff_on', None)
+        eff_off = getattr(self.unwrapped, 'eff_off', None)
+        self.best = (self.eff, self.struct.copy(), eff_on, eff_off)
+
+        return ret
+
 class ExpandObservation(gym.Wrapper):
     def __init__(self, env):
         super(ExpandObservation, self).__init__(env)
