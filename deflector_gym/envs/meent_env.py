@@ -214,6 +214,17 @@ class MeentAction1D4(MeentBase):
 
         return np.concatenate((self.struct, self.onehot[self.pos])), reward, False, {}
 
+class RewardNormaliser:
+    def __init__(self, beta=0.99, eps=1e-8):
+        self.mu = 0.0
+        self.var = 1.0
+        self.beta = beta
+        self.eps = eps
+
+    def update(self, x):
+        self.mu = self.beta * self.mu + (1 - self.beta) * x
+        self.var = self.beta * self.var + (1 - self.beta) * (x - self.mu)**2
+        return (x - self.mu) / (self.var**0.5 + self.eps)
 
 
 class MultiRIIndex(MeentBase):
@@ -229,12 +240,20 @@ class MultiRIIndex(MeentBase):
         reward_mode="shaped",
         lambda_off=1.0,
         gamma_delta=0.05,
-    ):
+        beta=0.99,
+        eps=1e-8,
+   ):
         # explicit, refactor away from kwargs.get
         super().__init__(n_cells, wavelength, desired_angle, order, thickness, refractive_index)
         self.reward_mode = reward_mode
         self.lambda_off = lambda_off
         self.gamma_delta = gamma_delta
+        self.mu = 0.0
+        self.var = 1.0
+        self.beta = beta
+        self.eps = eps
+        self.normaliser_on = RewardNormaliser(beta, eps)
+        self.normaliser_off = RewardNormaliser(beta, eps)
 
         # on/off refractive indices
         self.ri_on = refractive_index
@@ -294,6 +313,10 @@ class MultiRIIndex(MeentBase):
             pen   = off_n**2
             delta = self.gamma_delta * ((eff_on - prev_eff_on) - (eff_off - prev_eff_off)) / 100.0
             return float(base - pen + delta)
+        if self.reward_mode == "z-score":
+            reward_on = self.normaliser_on.update(eff_on  -prev_eff_on)
+            reward_off = self.normaliser_off.update(eff_off -prev_eff_off)
+            return float(reward_on - reward_off)
         else:
             # original scheme: delta improvement in margin
             # (eff_on - prev_eff_on) - (eff_off - prev_eff_off) == margin - prev_margin
