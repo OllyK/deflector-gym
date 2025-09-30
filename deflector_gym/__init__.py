@@ -32,3 +32,8 @@ register(
     entry_point='deflector_gym.envs.meent_env:MultiRIIndex'
 )
 
+register(
+    id='MultiWavelengthIndex-v0',
+    entry_point='deflector_gym.envs.meent_env:MultiWavelengthIndex'
+)
+
