@@ -37,7 +37,7 @@ class MeentBase(DeflectorBase):
             n_cells=256,
             wavelength=1100,
             desired_angle=70,
-            order=40,
+            order=163,
             thickness=325,
             refractive_index=1.45,
             *args,
@@ -51,7 +51,7 @@ class MeentBase(DeflectorBase):
         struct = struct[np.newaxis, np.newaxis, :]
 
         wls = np.array([self.wavelength])
-        period = abs(wls / np.sin(self.desired_angle / 180 * np.pi))
+        period = (2600.0,)
         calc = JLABCode(
             grating_type=0,
             n_I=self.refractive_index, n_II=1., theta=0, phi=0.,
@@ -60,9 +60,16 @@ class MeentBase(DeflectorBase):
             patterns=None, ucell=struct, thickness=np.array([self.thickness])
         )
 
-        eff, _, _ = calc.reproduce_acs_cell('p_si__real', 1)
+        first_order_eff, refl, tran = calc.reproduce_acs_cell('si3n4__real', 1)
+        
+        # access tran and refl directly by key
+        T_p4 = tran.get(4, 0.0)
+        T_m4 = tran.get(-4, 0.0)
+        R_p4 = refl.get(4, 0.0)
+        R_m4 = refl.get(-4, 0.0)
+        print(f"T(+4)={T_p4}, T(-4)={T_m4}, R(+4)={R_p4}, R(-4)={R_m4}")
 
-        return eff
+        return T_p4
 
 
 class MeentIndex(MeentBase):
@@ -434,6 +441,6 @@ class MultiWavelengthIndex(MeentBase):
             patterns=None, ucell=struct, thickness=np.array([self.thickness])
         )
 
-        eff, _, _ = calc.reproduce_acs_cell('p_si__real', 1)
+        eff, _, _ = calc.reproduce_acs_cell('si3n4__real', 1)
 
         return eff
