@@ -13,13 +13,22 @@ class JLABCode(RCWA):
                          ucell_materials,
                          thickness, algo)
 
-    def reproduce_acs_cell(self, n_ridge, n_groove):
+    def reproduce_acs_cell(self, n_ridge, n_groove, max_order=4):
 
         if type(n_ridge) == str:
             n_ridge = find_nk_index(n_ridge, self.mat_table, self.wls)
 
         self.ucell = (self.ucell + 1) / 2
         self.ucell = self.ucell * (n_ridge ** 2 - n_groove ** 2) + n_groove ** 2
+
+        # Need at least 2*max_order+1 harmonics to represent ±max_order
+        need = 2 * max_order + 1
+        if self.fourier_order < need:
+            raise ValueError(
+                f"fourier_order={self.fourier_order} too small for ±{max_order}; "
+                f"use ≥ {need} (odd recommended)."
+            )
+
 
         e_conv_all = to_conv_mat(self.ucell, self.fourier_order)
         o_e_conv_all = to_conv_mat(1 / self.ucell, self.fourier_order)
@@ -28,11 +37,21 @@ class JLABCode(RCWA):
 
         if self.grating_type == 0:
             center = de_ti.shape[0] // 2
-            tran_cut = de_ti[center - 1:center + 2][::-1]
-            refl_cut = de_ri[center - 1:center + 2][::-1]
+            s = slice(center - max_order, center + max_order + 1)  # inclusive ±max_order
+            tran_slice = de_ti[s]
+            refl_slice = de_ri[s]
+            # Map to diffraction orders m = [-max_order..+max_order]
+            m_list = np.arange(-max_order, max_order + 1)
+            T = {int(m): float(tran_slice[i]) for i, m in enumerate(m_list)}
+            R = {int(m): float(refl_slice[i]) for i, m in enumerate(m_list)}
+
+            # Back-compat: return T(+1) as the first scalar
+            T_p1 = T.get(+1, 0.0)
+            return T_p1, R, T
         else:
             x_c, y_c = np.array(de_ti.shape) // 2
             tran_cut = de_ti[x_c - 1:x_c + 2, y_c - 1:y_c + 2][::-1, ::-1]
             refl_cut = de_ri[x_c - 1:x_c + 2, y_c - 1:y_c + 2][::-1, ::-1]
 
         return tran_cut.flatten()[-1], refl_cut, tran_cut
+
