@@ -37,7 +37,7 @@ class MeentBase(DeflectorBase):
             n_cells=256,
             wavelength=1100,
             desired_angle=70,
-            order=40,
+            order=163,
             thickness=325,
             refractive_index=1.45,
             *args,
@@ -51,7 +51,7 @@ class MeentBase(DeflectorBase):
         struct = struct[np.newaxis, np.newaxis, :]
 
         wls = np.array([self.wavelength])
-        period = abs(wls / np.sin(self.desired_angle / 180 * np.pi))
+        period = (2600.0,)
         calc = JLABCode(
             grating_type=0,
             n_I=self.refractive_index, n_II=1., theta=0, phi=0.,
@@ -60,9 +60,16 @@ class MeentBase(DeflectorBase):
             patterns=None, ucell=struct, thickness=np.array([self.thickness])
         )
 
-        eff, _, _ = calc.reproduce_acs_cell('p_si__real', 1)
+        first_order_eff, refl, tran = calc.reproduce_acs_cell('si3n4__real', 1)
+        
+        # access tran and refl directly by key
+        T_p4 = tran.get(4, 0.0)
+        T_m4 = tran.get(-4, 0.0)
+        R_p4 = refl.get(4, 0.0)
+        R_m4 = refl.get(-4, 0.0)
+        print(f"T(+4)={T_p4}, T(-4)={T_m4}, R(+4)={R_p4}, R(-4)={R_m4}")
 
-        return eff
+        return T_p4
 
 
 class MeentIndex(MeentBase):
@@ -337,5 +344,103 @@ class MultiRIIndex(MeentBase):
         )
 
         eff, _, _ = calc.reproduce_acs_cell('p_si__real', 1)
+
+        return eff
+
+
+class MultiWavelengthIndex(MeentBase):
+    def __init__(
+        self,
+        n_cells=256,
+        wavelength=630,
+        desired_angle=60,
+        order=40,
+        thickness=160,
+        refractive_index=2.0,
+        wavelength_off1=540,
+        wavelength_off2=450,
+        reward_mode="shaped",
+        beta=0.99,
+        eps=1e-8,
+   ):
+        # explicit, refactor away from kwargs.get
+        super().__init__(n_cells, wavelength, desired_angle, order, thickness, refractive_index)
+        self.reward_mode = reward_mode
+        self.mu = 0.0
+        self.var = 1.0
+        self.beta = beta
+        self.eps = eps
+        self.normaliser_on = RewardNormaliser(beta, eps)
+        self.normaliser_off = RewardNormaliser(beta, eps)
+
+        # on/off wavelengths
+        self.wavelength_on = wavelength
+        self.wavelength_off1 = wavelength_off1
+        self.wavelength_off2 = wavelength_off2
+        
+        self.eff_on = 0.0
+        self.eff_off = 0.0
+
+        self.observation_space = gym.spaces.Box(
+            low=-1., high=1.,
+            shape=(self.n_cells,),
+            dtype=np.float64
+        )
+        self.action_space = gym.spaces.Discrete(self.n_cells)
+        
+    def get_efficiency(self, struct):
+        self.eff_on = float(self._compute(self.wavelength_on, struct))
+        self.eff_off = 0.5 * (float(self._compute(self.wavelength_off1, struct)) + 
+                              float(self._compute(self.wavelength_off2, struct)))
+        return self.eff_on - self.eff_off
+        
+    def reset(self):
+        self.struct = self.initialize_struct()
+        self.eff = self.get_efficiency(self.struct)
+        return self.struct.copy()
+
+    def step(self, action):
+        prev_on, prev_off = self.eff_on, self.eff_off
+        self.flip(action)
+        self.eff = self.get_efficiency(self.struct)
+
+        reward = self.calculate_reward(
+            self.eff_on, self.eff_off, prev_on, prev_off
+        )
+
+        # log both as custom_metrics
+        info = {'eff_on':  self.eff_on,
+                'eff_off': self.eff_off}
+        return self.struct.copy(), reward, False, info
+    
+    def calculate_reward(self, eff_on, eff_off, prev_eff_on, prev_eff_off):
+        margin = eff_on - eff_off
+        prev_margin = prev_eff_on - prev_eff_off
+        if self.reward_mode == "margin":
+            return margin
+        if self.reward_mode == "z-score":
+            reward_on = self.normaliser_on.update(eff_on  - prev_eff_on)
+            reward_off = self.normaliser_off.update(eff_off - prev_eff_off)
+            return float(reward_on - reward_off)
+        else:
+            # original scheme: delta improvement in margin
+            # (eff_on - prev_eff_on) - (eff_off - prev_eff_off) == margin - prev_margin
+            return float((eff_on - prev_eff_on) - (eff_off - prev_eff_off))
+
+    def _compute(self, wavelength, struct):
+        # same core as MeentBase.get_efficiency but with n_I=ri
+        struct = struct[np.newaxis, np.newaxis, :]
+
+        wls = np.array([wavelength])
+        period = abs(wls / np.sin(self.desired_angle / 180 * np.pi))
+        calc = JLABCode(
+            grating_type=0,
+            n_I=self.refractive_index, n_II=1., theta=0, phi=0.,
+            fourier_order=self.order, period=period,
+            wls=wls, pol=1,
+            patterns=None, ucell=struct, thickness=np.array([self.thickness])
+        )
+
+        eff, _, _ = calc.reproduce_acs_cell('si3n4__real', 1)
 
         return eff
