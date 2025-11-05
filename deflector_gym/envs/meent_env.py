@@ -40,18 +40,19 @@ class MeentBase(DeflectorBase):
             order=163,
             thickness=325,
             refractive_index=1.45,
+            eff_order=1,
             *args,
             **kwargs,
     ):
-        super().__init__(n_cells, wavelength, desired_angle, order, thickness, 
-                         refractive_index)
+        super().__init__(n_cells, wavelength, desired_angle, order, thickness,
+                         refractive_index, eff_order)
 
-    def get_efficiency(self, struct):
+    def get_efficiency(self, struct, order=+1):
         # struct [1, -1, 1, 1, ...]
         struct = struct[np.newaxis, np.newaxis, :]
 
         wls = np.array([self.wavelength])
-        period = (2600.0,)
+        period = abs(wls / np.sin(self.desired_angle / 180 * np.pi))
         calc = JLABCode(
             grating_type=0,
             n_I=self.refractive_index, n_II=1., theta=0, phi=0.,
@@ -62,14 +63,10 @@ class MeentBase(DeflectorBase):
 
         first_order_eff, refl, tran = calc.reproduce_acs_cell('si3n4__real', 1)
         
-        # access tran and refl directly by key
-        T_p4 = tran.get(4, 0.0)
-        T_m4 = tran.get(-4, 0.0)
-        R_p4 = refl.get(4, 0.0)
-        R_m4 = refl.get(-4, 0.0)
-        print(f"T(+4)={T_p4}, T(-4)={T_m4}, R(+4)={R_p4}, R(-4)={R_m4}")
+        # access tran directly by key
+        T = tran.get(order, 0.0)
 
-        return T_p4
+        return T
 
 
 class MeentIndex(MeentBase):

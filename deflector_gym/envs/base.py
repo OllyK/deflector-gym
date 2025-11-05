@@ -19,6 +19,7 @@ class DeflectorBase(gym.Env):
             order=40,
             thickness=325,
             refractive_index=1.45,
+            eff_order=1
     ):
         self.thickness = thickness
         self.order = order
@@ -26,6 +27,7 @@ class DeflectorBase(gym.Env):
         self.wavelength = wavelength
         self.desired_angle = desired_angle
         self.refractive_index = refractive_index
+        self.eff_order = eff_order
         self.struct = None
         self.eff = None  # uninitialized
 
